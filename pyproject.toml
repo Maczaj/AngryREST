@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "angryrest"
+version = "0.1.0"
+description = "A cross-platform REST API testing tool"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.6",
+    "httpx>=0.27",
+    "graphql-core>=3.2",
+]
+
+[project.scripts]
+angryrest = "angryrest.app:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-mock>=3.12", "poethepoet>=0.29"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.poe.tasks]
+
+[tool.poe.tasks.run]
+help = "Launch the AngryREST application"
+cmd  = "python -m angryrest"
+
+[tool.poe.tasks.test]
+help = "Run the test suite"
+cmd  = "pytest tests/ -v"
+
+[tool.poe.tasks.test-fast]
+help = "Run tests, stop at first failure"
+cmd  = "pytest tests/ -x -q"
+
+[tool.poe.tasks.install]
+help = "Install the package in editable mode with all dev dependencies"
+cmd  = "pip install -e .[dev]"
+
+[tool.poe.tasks.build]
+help = "Build a standalone executable with PyInstaller (requires angryrest.spec)"
+cmd  = "pyinstaller angryrest.spec"
