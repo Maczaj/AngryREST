@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QModelIndex, QRect, Qt, Signal
-from PySide6.QtGui import QColor
+from collections.abc import Callable
+from typing import cast
+
+from PySide6.QtCore import QAbstractItemModel, QEvent, QModelIndex, QObject, QPersistentModelIndex, QPoint, QRect, Qt, Signal
+from PySide6.QtGui import QColor, QMouseEvent, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -22,9 +25,9 @@ from PySide6.QtWidgets import (
 from angryrest.models.collection import Collection, RequestDef
 
 
-COLLECTION_ROLE = Qt.UserRole
-REQUEST_ROLE = Qt.UserRole + 1
-METHOD_ROLE = Qt.UserRole + 2
+COLLECTION_ROLE = Qt.ItemDataRole.UserRole
+REQUEST_ROLE = Qt.ItemDataRole.UserRole + 1
+METHOD_ROLE = Qt.ItemDataRole.UserRole + 2
 
 METHOD_COLORS = {
     "GET": "#4ec9b0",
@@ -40,7 +43,7 @@ METHOD_COLORS = {
 class CollectionDelegate(QStyledItemDelegate):
     """Renders method badges for request items and a ⋮ button for hovered collection items."""
 
-    def __init__(self, tree: QTreeWidget, dots_callback, parent=None):
+    def __init__(self, tree: QTreeWidget, dots_callback: Callable[[QTreeWidgetItem, QPoint], None], parent: QWidget | None = None):
         super().__init__(parent)
         self._tree = tree
         self._dots_callback = dots_callback
@@ -52,21 +55,21 @@ class CollectionDelegate(QStyledItemDelegate):
     def _dots_rect(self, item_rect: QRect) -> QRect:
         return QRect(item_rect.right() - 21, item_rect.top(), 22, item_rect.height())
 
-    def paint(self, painter, option, index) -> None:
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex) -> None:
         item = self._tree.itemFromIndex(index)
-        is_request = item is not None and item.parent() is not None
+        is_request = item is not None and item.parent() is not None  # type: ignore[comparison-overlap]
 
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
         opt.text = ""
         style = opt.widget.style() if opt.widget else QApplication.style()
-        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
 
-        is_selected = bool(option.state & QStyle.State_Selected)
+        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
 
         if is_request:
             method = item.data(0, METHOD_ROLE) or ""
-            name = index.data(Qt.DisplayRole) or ""
+            name = index.data(Qt.ItemDataRole.DisplayRole) or ""
 
             painter.save()
             fm = painter.fontMetrics()
@@ -79,7 +82,7 @@ class CollectionDelegate(QStyledItemDelegate):
             badge_rect = QRect(
                 option.rect.left() + 4, option.rect.top(), badge_w, option.rect.height()
             )
-            painter.drawText(badge_rect, Qt.AlignVCenter | Qt.AlignLeft, method)
+            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, method)
 
             regular_font = painter.font()
             regular_font.setBold(False)
@@ -92,13 +95,13 @@ class CollectionDelegate(QStyledItemDelegate):
                 option.rect.width() - badge_w - 14,
                 option.rect.height(),
             )
-            elided = painter.fontMetrics().elidedText(name, Qt.ElideRight, name_rect.width())
-            painter.drawText(name_rect, Qt.AlignVCenter | Qt.AlignLeft, elided)
+            elided = painter.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, name_rect.width())
+            painter.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
 
             painter.restore()
 
         else:
-            name = index.data(Qt.DisplayRole) or ""
+            name = index.data(Qt.ItemDataRole.DisplayRole) or ""
             is_hovered = index == self._hovered_index
 
             painter.save()
@@ -114,7 +117,7 @@ class CollectionDelegate(QStyledItemDelegate):
                 option.rect.width() - right_margin - 4,
                 option.rect.height(),
             )
-            painter.drawText(name_rect, Qt.AlignVCenter | Qt.AlignLeft, name)
+            painter.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, name)
 
             if is_hovered:
                 dots_rect = self._dots_rect(option.rect)
@@ -122,16 +125,17 @@ class CollectionDelegate(QStyledItemDelegate):
                 regular_font.setBold(False)
                 painter.setFont(regular_font)
                 painter.setPen(QColor("#888888"))
-                painter.drawText(dots_rect, Qt.AlignVCenter | Qt.AlignCenter, "⋮")
+                painter.drawText(dots_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignCenter, "⋮")
 
             painter.restore()
 
-    def editorEvent(self, event, model, option, index) -> bool:
+    def editorEvent(self, event: QEvent, model: QAbstractItemModel, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex) -> bool:
         if event.type() == QEvent.Type.MouseButtonRelease:
             item = self._tree.itemFromIndex(index)
-            if item is not None and item.parent() is None:
+            if item is not None and item.parent() is None:  # type: ignore[comparison-overlap]
                 dots_rect = self._dots_rect(option.rect)
-                click_pos = event.position().toPoint()
+                mouse_event = cast(QMouseEvent, event)
+                click_pos = mouse_event.position().toPoint()
                 if dots_rect.contains(click_pos):
                     global_pos = self._tree.viewport().mapToGlobal(click_pos)
                     self._dots_callback(item, global_pos)
@@ -141,11 +145,16 @@ class CollectionDelegate(QStyledItemDelegate):
 
 class CollectionsPanel(QWidget):
     request_selected = Signal(object, object)  # (Collection, RequestDef)
+    request_cleared = Signal()  # emitted when the currently-open request is deleted
     data_changed = Signal()
+    collection_selected = Signal(object)       # (Collection) — emitted when a collection item is clicked
+    collection_run_requested = Signal(object)  # (Collection) — emitted from "Run Collection" menu action
 
     def __init__(self, collections: list[Collection], parent: QWidget | None = None):
         super().__init__(parent)
         self.collections = collections
+        self._rebuilding = False
+        self._current_req_id: str | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -169,13 +178,14 @@ class CollectionsPanel(QWidget):
         # Tree
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
-        self.tree.setDragDropMode(QAbstractItemView.InternalMove)
-        self.tree.setDefaultDropAction(Qt.MoveAction)
-        self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.tree.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.tree.itemClicked.connect(self._on_item_clicked)
         self.tree.model().rowsMoved.connect(self._on_reorder)
+        self.tree.model().rowsInserted.connect(self._on_reorder)
         self.tree.setMouseTracking(True)
         self.tree.viewport().setMouseTracking(True)
         self._delegate = CollectionDelegate(self.tree, self._on_dots_clicked)
@@ -187,12 +197,13 @@ class CollectionsPanel(QWidget):
         self._rebuild_tree()
 
     def _rebuild_tree(self) -> None:
+        self._rebuilding = True
         self.tree.clear()
         for coll in self.collections:
             coll_item = QTreeWidgetItem([coll.name])
             coll_item.setData(0, COLLECTION_ROLE, coll.id)
             coll_item.setFlags(
-                Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled
+                Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsDropEnabled
             )
             self.tree.addTopLevelItem(coll_item)
 
@@ -202,15 +213,19 @@ class CollectionsPanel(QWidget):
                 req_item.setData(0, REQUEST_ROLE, req.id)
                 req_item.setData(0, METHOD_ROLE, req.method)
                 req_item.setFlags(
-                    Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled
+                    Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsDragEnabled
                 )
                 coll_item.addChild(req_item)
 
             coll_item.setExpanded(True)
 
+        self._rebuilding = False
+
     def refresh_request_label(self, collection: Collection, request: RequestDef) -> None:
         for i in range(self.tree.topLevelItemCount()):
             coll_item = self.tree.topLevelItem(i)
+            if coll_item is None:
+                continue
             if coll_item.data(0, COLLECTION_ROLE) == collection.id:
                 for j in range(coll_item.childCount()):
                     req_item = coll_item.child(j)
@@ -226,9 +241,14 @@ class CollectionsPanel(QWidget):
             coll = self._find_collection(coll_id)
             req = self._find_request(coll, req_id) if coll else None
             if coll and req:
+                self._current_req_id = req_id
                 self.request_selected.emit(coll, req)
+        elif coll_id and not req_id:
+            coll = self._find_collection(coll_id)
+            if coll:
+                self.collection_selected.emit(coll)
 
-    def eventFilter(self, obj, event) -> bool:
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if obj is self.tree.viewport() and event.type() == QEvent.Type.Leave:
             self._delegate.set_hovered_index(QModelIndex())
             self.tree.viewport().update()
@@ -238,8 +258,11 @@ class CollectionsPanel(QWidget):
         self._delegate.set_hovered_index(index)
         self.tree.viewport().update()
 
-    def _on_dots_clicked(self, item: QTreeWidgetItem, global_pos) -> None:
+    def _on_dots_clicked(self, item: QTreeWidgetItem, global_pos: QPoint) -> None:
         menu = QMenu(self)
+        run_action = menu.addAction("▶ Run Collection")
+        run_action.triggered.connect(lambda: self._run_collection_item(item))
+        menu.addSeparator()
         rename_action = menu.addAction("Rename Collection")
         rename_action.triggered.connect(lambda: self._rename_collection(item))
         add_req_action = menu.addAction("Add Request")
@@ -249,35 +272,43 @@ class CollectionsPanel(QWidget):
         menu.exec(global_pos)
 
     def _on_reorder(self) -> None:
-        # Sync model order from the tree
+        if self._rebuilding:
+            return
+        # Build a global map of all requests before modifying anything
+        all_requests: dict[str, RequestDef] = {}
+        for coll in self.collections:
+            for req in coll.requests:
+                all_requests[req.id] = req
+            coll.requests = []  # Will be repopulated from the tree below
+
         new_collections_order: list[str] = []
         for i in range(self.tree.topLevelItemCount()):
             coll_item = self.tree.topLevelItem(i)
+            if coll_item is None:
+                continue
             coll_id = coll_item.data(0, COLLECTION_ROLE)
             new_collections_order.append(coll_id)
 
             coll = self._find_collection(coll_id)
             if coll:
-                new_request_order: list[str] = []
                 for j in range(coll_item.childCount()):
                     req_item = coll_item.child(j)
                     rid = req_item.data(0, REQUEST_ROLE)
-                    if rid:
-                        new_request_order.append(rid)
-
-                req_map = {r.id: r for r in coll.requests}
-                coll.requests = [req_map[rid] for rid in new_request_order if rid in req_map]
+                    if rid and rid in all_requests:
+                        coll.requests.append(all_requests[rid])
+                        # Keep COLLECTION_ROLE in sync so clicks resolve correctly
+                        req_item.setData(0, COLLECTION_ROLE, coll_id)
 
         # Reorder collections list
         coll_map = {c.id: c for c in self.collections}
         self.collections[:] = [coll_map[cid] for cid in new_collections_order if cid in coll_map]
         self.data_changed.emit()
 
-    def _show_context_menu(self, pos) -> None:
+    def _show_context_menu(self, pos: QPoint) -> None:
         item = self.tree.itemAt(pos)
         menu = QMenu(self)
 
-        if item is None:
+        if item is None:  # type: ignore[comparison-overlap]
             action = menu.addAction("New Collection")
             action.triggered.connect(self._new_collection)
         elif item.data(0, REQUEST_ROLE):
@@ -290,6 +321,9 @@ class CollectionsPanel(QWidget):
             del_action.triggered.connect(lambda: self._delete_request(item))
         else:
             # Collection item
+            run_action = menu.addAction("▶ Run Collection")
+            run_action.triggered.connect(lambda: self._run_collection_item(item))
+            menu.addSeparator()
             rename_action = menu.addAction("Rename Collection")
             rename_action.triggered.connect(lambda: self._rename_collection(item))
             add_req_action = menu.addAction("Add Request")
@@ -298,6 +332,12 @@ class CollectionsPanel(QWidget):
             del_action.triggered.connect(lambda: self._delete_collection(item))
 
         menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _run_collection_item(self, item: QTreeWidgetItem) -> None:
+        coll_id = item.data(0, COLLECTION_ROLE)
+        coll = self._find_collection(coll_id)
+        if coll:
+            self.collection_run_requested.emit(coll)
 
     def _new_collection(self) -> None:
         name, ok = QInputDialog.getText(self, "New Collection", "Collection name:")
@@ -309,7 +349,7 @@ class CollectionsPanel(QWidget):
 
     def _new_request(self) -> None:
         item = self.tree.currentItem()
-        if item is None:
+        if item is None:  # type: ignore[comparison-overlap]
             if self.collections:
                 coll = self.collections[0]
             else:
@@ -358,11 +398,15 @@ class CollectionsPanel(QWidget):
         reply = QMessageBox.question(
             self, "Delete Collection",
             f"Delete collection '{coll.name}' and all its requests?",
-            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
+            contained_ids = {r.id for r in coll.requests}
             self.collections.remove(coll)
             self._rebuild_tree()
+            if self._current_req_id in contained_ids:
+                self._current_req_id = None
+                self.request_cleared.emit()
             self.data_changed.emit()
 
     def _rename_request(self, item: QTreeWidgetItem) -> None:
@@ -404,11 +448,14 @@ class CollectionsPanel(QWidget):
         reply = QMessageBox.question(
             self, "Delete Request",
             f"Delete request '{req.name}'?",
-            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             coll.requests.remove(req)
             self._rebuild_tree()
+            if req_id == self._current_req_id:
+                self._current_req_id = None
+                self.request_cleared.emit()
             self.data_changed.emit()
 
     def _find_collection(self, coll_id: str) -> Collection | None:

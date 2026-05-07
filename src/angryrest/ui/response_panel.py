@@ -96,6 +96,13 @@ class ResponsePanel(QWidget):
         self.error_widget.setVisible(False)
         self._placeholder.setVisible(True)
 
+    def clear(self) -> None:
+        self._show_placeholder()
+        self.body_view.setPlainText("")
+        self.headers_table.setRowCount(0)
+        self.script_output.setPlainText("")
+        self.tabs.setTabText(2, "Script Output")
+
     def show_loading(self) -> None:
         self._placeholder.setVisible(False)
         self.error_widget.setVisible(False)

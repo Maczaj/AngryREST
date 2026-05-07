@@ -193,6 +193,7 @@ class RequestPanel(QWidget):
 
         self._loading = False
         self._update_raw_view()
+        self.body_editor.on_request_loaded()
 
     def save_to_request(self) -> RequestDef | None:
         if not self._current_request:
@@ -236,6 +237,11 @@ class RequestPanel(QWidget):
         req.post_script = self.post_script_editor.toPlainText()
 
         return req
+
+    def clear_request(self) -> None:
+        self._current_collection = None
+        self._current_request = None
+        self._set_editing_visible(False)
 
     def get_current_request(self) -> tuple[Collection | None, RequestDef | None]:
         return self._current_collection, self._current_request

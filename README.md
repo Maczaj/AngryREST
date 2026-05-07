@@ -1,5 +1,7 @@
 # AngryREST
 
+![Screenshot](.github/assets/angry_logotype_full.png)
+
 > ✍️ *Introduction goes here.*
 
 ---

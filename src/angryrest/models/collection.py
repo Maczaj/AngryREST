@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -10,11 +11,11 @@ class KeyValue:
     value: str = ""
     enabled: bool = True
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {"key": self.key, "value": self.value, "enabled": self.enabled}
 
     @classmethod
-    def from_dict(cls, data: dict) -> KeyValue:
+    def from_dict(cls, data: dict[str, Any]) -> KeyValue:
         return cls(
             key=data.get("key", ""),
             value=data.get("value", ""),
@@ -38,7 +39,7 @@ class RequestDef:
     pre_script: str = ""
     post_script: str = ""
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -56,7 +57,7 @@ class RequestDef:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> RequestDef:
+    def from_dict(cls, data: dict[str, Any]) -> RequestDef:
         return cls(
             id=data.get("id", str(uuid.uuid4())),
             name=data.get("name", "New Request"),
@@ -80,7 +81,7 @@ class Collection:
     name: str = "New Collection"
     requests: list[RequestDef] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -88,7 +89,7 @@ class Collection:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> Collection:
+    def from_dict(cls, data: dict[str, Any]) -> Collection:
         return cls(
             id=data.get("id", str(uuid.uuid4())),
             name=data.get("name", "New Collection"),

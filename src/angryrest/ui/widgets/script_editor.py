@@ -125,24 +125,40 @@ class ScriptEditor(QPlainTextEdit):
         self.setTextCursor(tc)
 
     def keyPressEvent(self, event) -> None:
-        if self._completer.popup().isVisible():
-            if event.key() in (Qt.Key_Enter, Qt.Key_Return, Qt.Key_Escape, Qt.Key_Tab):
+        ctrl_space = (
+            event.key() == Qt.Key.Key_Space
+            and bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        )
+
+        popup = self._completer.popup()
+        if popup is not None and popup.isVisible():
+            if event.key() == Qt.Key.Key_Escape:
+                popup.hide()
+                return
+            if event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab):
                 event.ignore()
                 return
 
-        super().keyPressEvent(event)
+        if not ctrl_space:
+            super().keyPressEvent(event)
 
         # Trigger completion
         tc = self.textCursor()
-        tc.select(tc.WordUnderCursor)
+        tc.select(tc.SelectionType.WordUnderCursor)
         prefix = tc.selectedText()
-        if len(prefix) >= 2:
+        if ctrl_space or len(prefix) >= 2:
             self._completer.setCompletionPrefix(prefix)
+            # Re-fetch popup — it may be created lazily on first setCompletionPrefix call
+            popup = self._completer.popup()
+            if popup is None:
+                return
             cr = self.cursorRect()
             cr.setWidth(
-                self._completer.popup().sizeHintForColumn(0)
-                + self._completer.popup().verticalScrollBar().sizeHint().width()
+                popup.sizeHintForColumn(0)
+                + popup.verticalScrollBar().sizeHint().width()
             )
             self._completer.complete(cr)
         else:
-            self._completer.popup().hide()
+            popup = self._completer.popup()
+            if popup is not None:
+                popup.hide()

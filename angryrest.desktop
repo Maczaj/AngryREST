@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=AngryREST
+Comment=A cross-platform REST API testing tool
+Exec=angryrest
+Icon=angryrest
+Categories=Development;WebDevelopment;Network;
+Terminal=false
+StartupWMClass=angryrest

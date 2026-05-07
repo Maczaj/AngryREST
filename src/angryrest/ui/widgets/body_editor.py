@@ -30,8 +30,10 @@ from angryrest.services import app_logger as _app_logger
 from angryrest.services.graphql_schema import (
     AUTH_HEADER_NAMES,
     SchemaFetcher,
+    build_schema_tree,
     extract_completions as extract_graphql_completions,
     get_cached_schema as get_cached_graphql_schema,
+    get_completions_at_cursor,
     host_from_url,
 )
 from angryrest.services.http_client import substitute_params
@@ -48,10 +50,13 @@ from angryrest.ui.widgets.wayland_combo_box import WaylandComboBox
 
 
 class GraphQLQueryEditor(QPlainTextEdit):
-    """QPlainTextEdit with keyword autocompletion powered by a QCompleter."""
+    """QPlainTextEdit with context-aware autocompletion powered by a QCompleter."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._schema_tree: dict[str, Any] | None = None
+        self._static_completions: list[str] = []
+
         self._completer = QCompleter(self)
         self._model = QStringListModel(self._completer)
         self._completer.setModel(self._model)
@@ -61,7 +66,13 @@ class GraphQLQueryEditor(QPlainTextEdit):
         self._completer.activated.connect(self._insert_completion)
 
     def set_completions(self, words: list[str]) -> None:
+        """Set a static completion list (used when no schema tree is available)."""
+        self._static_completions = words
         self._model.setStringList(words)
+
+    def set_schema_tree(self, schema_tree: dict[str, Any]) -> None:
+        """Set the GraphQL schema tree for context-aware completions."""
+        self._schema_tree = schema_tree
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -76,40 +87,80 @@ class GraphQLQueryEditor(QPlainTextEdit):
 
     def _insert_completion(self, completion: str) -> None:
         prefix_len = len(self._completer.completionPrefix())
-        extra = len(completion) - prefix_len
-        if extra <= 0:
-            return
         cursor = self.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.Left)
-        cursor.movePosition(QTextCursor.MoveOperation.EndOfWord)
-        cursor.insertText(completion[-extra:])
+        # Select the already-typed prefix chars so insertText replaces them cleanly
+        if prefix_len > 0:
+            cursor.movePosition(
+                QTextCursor.MoveOperation.PreviousCharacter,
+                QTextCursor.MoveMode.KeepAnchor,
+                prefix_len,
+            )
+        cursor.insertText(completion)
         self.setTextCursor(cursor)
+
+    def _show_completion_popup(self) -> None:
+        """Compute context-aware completions and show the popup."""
+        if self._schema_tree is not None:
+            text = self.toPlainText()
+            cursor_pos = self.textCursor().position()
+            words = get_completions_at_cursor(self._schema_tree, text, cursor_pos)
+        else:
+            words = self._static_completions
+
+        # Always rebuild the model so Qt sees a fresh state (fixes stale-popup bug)
+        self._model.setStringList(words)
+
+        prefix = self._completion_prefix()
+        self._completer.setCompletionPrefix(prefix)
+
+        popup = self._completer.popup()
+        if popup is None:
+            return
+
+        if self._completer.completionCount() == 0:
+            popup.hide()
+            return
+
+        popup.setCurrentIndex(self._completer.completionModel().index(0, 0))
+        rect = self.cursorRect()
+        rect.setWidth(
+            popup.sizeHintForColumn(0)
+            + popup.verticalScrollBar().sizeHint().width()
+        )
+        self._completer.complete(rect)
 
     # ------------------------------------------------------------------
     # Qt overrides
     # ------------------------------------------------------------------
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        ctrl_space = (
+            event.key() == Qt.Key.Key_Space
+            and bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        )
+
         popup = self._completer.popup()
-        if popup is not None and popup.isVisible() and event.key() in (
-            Qt.Key.Key_Enter,
-            Qt.Key.Key_Return,
-            Qt.Key.Key_Escape,
-            Qt.Key.Key_Tab,
-            Qt.Key.Key_Backtab,
-        ):
-            event.ignore()
+        if popup is not None and popup.isVisible():
+            if event.key() == Qt.Key.Key_Escape:
+                popup.hide()
+                return
+            if event.key() in (
+                Qt.Key.Key_Enter,
+                Qt.Key.Key_Return,
+                Qt.Key.Key_Tab,
+                Qt.Key.Key_Backtab,
+            ):
+                event.ignore()
+                return
+
+        if ctrl_space:
+            self._show_completion_popup()
             return
 
         super().keyPressEvent(event)
 
-        # popup may be None before completer has ever shown; bail out early
-        if popup is None:
-            return
-
-        # Don't attempt completion for pure-modifier or navigation keys
-        ctrl = event.modifiers() & Qt.KeyboardModifier.ControlModifier
-        if ctrl or event.key() in (
+        # Hide popup on navigation or modifier combos
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier or event.key() in (
             Qt.Key.Key_Backspace,
             Qt.Key.Key_Delete,
             Qt.Key.Key_Left,
@@ -119,28 +170,17 @@ class GraphQLQueryEditor(QPlainTextEdit):
             Qt.Key.Key_Home,
             Qt.Key.Key_End,
         ):
-            popup.hide()
+            if popup is not None:
+                popup.hide()
             return
 
+        # Auto-trigger after typing 2+ identifier characters
         prefix = self._completion_prefix()
-        if len(prefix) < 2:
-            popup.hide()
-            return
-
-        if prefix != self._completer.completionPrefix():
-            self._completer.setCompletionPrefix(prefix)
-            popup.setCurrentIndex(self._completer.completionModel().index(0, 0))
-
-        if self._completer.completionCount() == 0:
-            popup.hide()
-            return
-
-        rect = self.cursorRect()
-        rect.setWidth(
-            popup.sizeHintForColumn(0)
-            + popup.verticalScrollBar().sizeHint().width()
-        )
-        self._completer.complete(rect)
+        if len(prefix) >= 2:
+            self._show_completion_popup()
+        else:
+            if popup is not None:
+                popup.hide()
 
 
 class JsonBodyEditor(GraphQLQueryEditor):
@@ -244,7 +284,7 @@ class FileFieldsEditor(QWidget):
             self._add_row(enabled, name, path)
 
 
-
+class BodyEditor(QWidget):
     changed = Signal()
 
     BODY_TYPES = ["None", "Form", "JSON", "GraphQL", "Multipart"]
@@ -489,8 +529,9 @@ class FileFieldsEditor(QWidget):
         self._fetch_schema_btn.setText("Fetch Schema")
 
     def _on_schema_ready(self, host: str, schema: dict[str, Any]) -> None:
+        schema_tree = build_schema_tree(schema)
+        self.graphql_query.set_schema_tree(schema_tree)
         completions = extract_graphql_completions(schema)
-        self.graphql_query.set_completions(completions)
         _log.info(
             "Schema loaded for %s — %d completion(s) available",
             host,
@@ -524,7 +565,7 @@ class FileFieldsEditor(QWidget):
         host = host_from_url(url)
         cached = get_cached_graphql_schema(host)
         if cached is not None:
-            self.graphql_query.set_completions(extract_graphql_completions(cached))
+            self.graphql_query.set_schema_tree(build_schema_tree(cached))
             return
         self._trigger_schema_fetch(silent=True)
 
@@ -620,6 +661,19 @@ class FileFieldsEditor(QWidget):
     def set_body_type(self, body_type: str) -> None:
         mapping = {"none": 0, "form": 1, "json": 2, "graphql": 3, "multipart": 4}
         self.type_combo.setCurrentIndex(mapping.get(body_type, 0))
+
+    def on_request_loaded(self) -> None:
+        """Must be called after a request is fully loaded into the editor.
+
+        Re-applies schema-based completions from cache for the current body
+        type even when the body-type combo index has not changed (which would
+        suppress the normal ``currentIndexChanged`` signal).
+        """
+        index = self.type_combo.currentIndex()
+        if index == 2:  # JSON
+            self._auto_fetch_openapi()
+        elif index == 3:  # GraphQL
+            self._auto_fetch_schema()
 
     def get_body_content(self) -> str:
         bt = self.get_body_type()

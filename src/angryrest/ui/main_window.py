@@ -82,7 +82,7 @@ class _RequestWorker(QThread):
             )
             env = pre_result.env
             if not pre_result.success:
-                self.finished.emit(None, pre_result, None)
+                self.result_ready.emit(None, pre_result, None)
                 return
 
         response = self.http_client.send(
@@ -124,7 +124,9 @@ class MainWindow(QMainWindow):
         self.collections = self.storage.load_collections()
         self.environments = self.storage.load_environments()
         self._current_env: Environment | None = None
+        self._current_collection: Collection | None = None
         self._worker: _RequestWorker | None = None
+        self._response_cache: dict[str, tuple[ResponseData | ErrorResult | None, ScriptResult | None, ScriptResult | None]] = {}
 
         # --- Toolbar ---
         toolbar = QToolBar("Main Toolbar")
@@ -151,7 +153,10 @@ class MainWindow(QMainWindow):
         # --- Panels ---
         self.collections_panel = CollectionsPanel(self.collections)
         self.collections_panel.request_selected.connect(self._on_request_selected)
+        self.collections_panel.request_cleared.connect(self._on_request_cleared)
         self.collections_panel.data_changed.connect(self._save_all)
+        self.collections_panel.collection_selected.connect(self._on_collection_selected)
+        self.collections_panel.collection_run_requested.connect(self._run_collection_directly)
 
         self.request_panel = RequestPanel()
         self.request_panel.send_requested.connect(self._on_send_request)
@@ -239,7 +244,24 @@ class MainWindow(QMainWindow):
     # --- Request handling ---
 
     def _on_request_selected(self, collection: Collection, request: RequestDef) -> None:
+        self._current_collection = collection
         self.request_panel.load_request(collection, request)
+        if request.id in self._response_cache:
+            cached_response, pre_result, post_result = self._response_cache[request.id]
+            if cached_response is None and pre_result and not pre_result.success:
+                error = ErrorResult("other", f"Pre-script error: {pre_result.error}")
+                self.response_panel.show_error(error)
+            elif isinstance(cached_response, ErrorResult):
+                self.response_panel.show_error(cached_response)
+            elif isinstance(cached_response, ResponseData):
+                self.response_panel.show_response(cached_response)
+            self.response_panel.show_script_output(pre_result, post_result)
+        else:
+            self.response_panel.clear()
+
+    def _on_request_cleared(self) -> None:
+        self.request_panel.clear_request()
+        self.response_panel.clear()
 
     def _on_request_data_changed(self) -> None:
         coll, req = self.request_panel.get_current_request()
@@ -300,9 +322,18 @@ class MainWindow(QMainWindow):
             post_script=req.post_script,
         )
         self._worker.result_ready.connect(self._on_request_finished)
-        # Keep the QThread alive until it finishes, then schedule C++ cleanup.
+        # Clear the Python reference before deleteLater destroys the C++ object,
+        # so any subsequent isRunning() / attribute access cannot crash.
+        self._worker.finished.connect(self._on_request_worker_done)
         self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
+
+    def _on_request_worker_done(self) -> None:
+        # Only clear the reference if it still points to the worker that just
+        # finished — a new request might have started between result_ready and
+        # this finished slot firing.
+        if self._worker is self.sender():
+            self._worker = None
 
     def _on_request_finished(
         self,
@@ -328,6 +359,10 @@ class MainWindow(QMainWindow):
 
         self.response_panel.show_script_output(pre_result, post_result)
 
+        _, req = self.request_panel.get_current_request()
+        if req:
+            self._response_cache[req.id] = (response, pre_result, post_result)
+
         self._update_logs_btn()
 
     # --- Logs ---
@@ -349,19 +384,27 @@ class MainWindow(QMainWindow):
 
     # --- Collection runner ---
 
+    def _on_collection_selected(self, collection: Collection) -> None:
+        self._current_collection = collection
+
+    def _run_collection_directly(self, collection: Collection) -> None:
+        env_vars = self._get_env_vars()
+        dlg = CollectionRunnerDialog(
+            collection, env_vars, self.http_client, self.script_engine, self
+        )
+        dlg.exec()
+
     def _run_collection(self) -> None:
         coll, _ = self.request_panel.get_current_request()
+        if not coll:
+            coll = self._current_collection
         if not coll:
             if self.collections:
                 coll = self.collections[0]
             else:
                 return
 
-        env_vars = self._get_env_vars()
-        dlg = CollectionRunnerDialog(
-            coll, env_vars, self.http_client, self.script_engine, self
-        )
-        dlg.exec()
+        self._run_collection_directly(coll)
 
     # --- Persistence ---
 
