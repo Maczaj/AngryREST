@@ -1,6 +1,6 @@
 # AngryREST
 
-![App logo](angry_logotype_full_2.png)
+![App logo](./angry_logotype_full_2.png)
 
 > ✍️ *Introduction goes here.*
 
