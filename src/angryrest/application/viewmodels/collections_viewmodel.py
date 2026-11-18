@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt, Signal, Slot
+from PySide6.QtCore import Property, QAbstractListModel, QModelIndex, Qt, Signal, Slot
 
 from angryrest.application.services.collection_service import CollectionService
 from angryrest.domain.models.collection import Collection
@@ -23,6 +23,10 @@ class CollectionsViewModel(QAbstractListModel):
         self._service = collection_service
         self._collections: list[Collection] = []
         self._selected_index: int = -1
+
+    @Property(int, notify=count_changed)
+    def count(self) -> int:
+        return len(self._collections)
 
     def roleNames(self) -> dict[int, bytes]:
         return {

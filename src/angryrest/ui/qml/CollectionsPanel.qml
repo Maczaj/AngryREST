@@ -12,6 +12,7 @@ Item {
         RowLayout {
             spacing: 4
             Button {
+                objectName: "addCollectionBtn"
                 text: "+ Collection"
                 font.pixelSize: 12
                 Layout.fillWidth: true
@@ -33,7 +34,7 @@ Item {
                 text: "+ Request"
                 font.pixelSize: 12
                 Layout.fillWidth: true
-                enabled: collectionsVM.rowCount() > 0
+                enabled: collectionsVM.count > 0
                 background: Rectangle {
                     color: parent.enabled ? (parent.hovered ? theme.buttonHover : theme.buttonDefault) : theme.buttonDisabled
                     border.color: theme.borderButton
