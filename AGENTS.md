@@ -1,6 +1,6 @@
 # AGENTS.md — AngryREST
 
-Cross-platform desktop REST/GraphQL client (Postman-like). Python 3.11+, PySide6 (Qt6), httpx, single `src/angryrest` package, active branch **`mvp`** (not `master`).
+Cross-platform desktop REST/GraphQL client (Postman-like). Python 3.11+, PySide6 (Qt6), httpx, single `src/angryrest` package, active branch **`main`** (protected default branch).
 
 ---
 
@@ -65,7 +65,7 @@ pip install pyinstaller && pyinstaller angryrest.spec
 
 ## Required after every change — MANDATORY ✅ GATE
 
-**🚫 NEVER commit directly to `mvp`.** All work is done on a feature branch. Create one with `git checkout -b <branch-name>` before any editing. Commits on `mvp` are forbidden — if you accidentally commit to `mvp`, undo it immediately and create a branch.
+**🚫 NEVER commit directly to `main`.** All work is done on a feature branch. Create one with `git checkout -b <branch-name>` before any editing. Commits on `main` are forbidden — if you accidentally commit to `main`, undo it immediately and create a branch.
 
 You MUST complete ALL of the following before considering any change done:
 
@@ -73,7 +73,7 @@ You MUST complete ALL of the following before considering any change done:
 2. **Write tests for every changed component.** Every new function/method/module must have tests; every behavioral change adds/updates test cases. No exceptions — untested code is incomplete code.
 3. **Run the full test suite** (`poe test`). Nothing must break.
 4. **Run `./scan-sonar.sh`.** The Quality Gate must pass. If a condition fails — coverage, duplication, violations — resolve it before proceeding. Pre-existing failures in an untouched area may be documented in the PR body with justification.
-5. **Create a pull request** using `gh pr create` (base `mvp`). This is the final step and MUST NOT be skipped. If a PR is already open for the branch, push to it instead.
+5. **Create a pull request** using `gh pr create` (base `main`). This is the final step and MUST NOT be skipped. If a PR is already open for the branch, push to it instead.
 6. **Follow-up changes after a PR is open** go to the same PR branch — commit and push; never leave deltas only in the working tree.
 
 If any gate fails, fix it and re-run. Do not hand off incomplete work.
