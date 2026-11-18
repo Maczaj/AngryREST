@@ -90,6 +90,7 @@ def _find_text_containing(parent: QQuickItem, substring: str) -> bool:
 def _load_main_window(qtbot, theme: QObject, vm: CollectionsViewModel) -> QQmlApplicationEngine:
     engine = QQmlApplicationEngine()
     theme.setParent(engine)
+    vm.setParent(engine)
     engine.addImportPath(str(QML_DIR))
     engine.rootContext().setContextProperty("collectionsVM", vm)
     engine.rootContext().setContextProperty("theme", theme)

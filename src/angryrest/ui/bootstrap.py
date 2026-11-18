@@ -59,7 +59,7 @@ def bootstrap_engine(
     storage = JsonStorageAdapter()
     collection_service = CollectionService(storage)
 
-    collections_vm = CollectionsViewModel(collection_service)
+    collections_vm = CollectionsViewModel(collection_service, parent=engine)
     collections_vm.load()
 
     theme = Theme(parent=engine)

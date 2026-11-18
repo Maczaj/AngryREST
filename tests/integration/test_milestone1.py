@@ -64,8 +64,10 @@ class TestAppBootstrap:
             collection_service = CollectionService(storage)
 
             engine = QQmlApplicationEngine()
+            vm = CollectionsViewModel(collection_service)
+            vm.setParent(engine)
             engine.rootContext().setContextProperty(
-                "collectionsVM", CollectionsViewModel(collection_service)
+                "collectionsVM", vm
             )
             theme = _TestTheme(parent=engine)
             engine.rootContext().setContextProperty("theme", theme)
