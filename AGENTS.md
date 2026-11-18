@@ -4,6 +4,30 @@ Cross-platform desktop REST/GraphQL client (Postman-like). Python 3.11+, PySide6
 
 ---
 
+## Working principles
+
+=== SPECS: source of truth for behavior ===
+Every functional change MUST update the relevant spec(s). Specs define *what* the app does — they are NOT implementation notes. The code implements the spec; the spec does not describe the code.
+
+| Spec | Purpose | When to use |
+|------|---------|-------------|
+| `docs/PRODUCT_SPEC.md` | What the app does: features, user flows, behavior rules. | Adding/removing features, changing capabilities or flows. |
+| `docs/UX_SPEC.md` | How it looks/feels: design tokens, layouts, interaction patterns. | Changing UI behavior, adding controls, updating tokens. |
+| `docs/ARCHITECTURE.md` | How it's built: hexagonal layers, MVVM/QML, ports & adapters, DI, threading. | Structural changes, new services, layer-boundary changes. |
+
+**When to update which spec:**
+- User-facing behavior change → `PRODUCT_SPEC.md` + (if UI-visible) `UX_SPEC.md`
+- Structural/architecture change → `ARCHITECTURE.md` (+ ADR if significant)
+- Bug fix → check whether the spec already describes the correct behavior (the bug is implementation drift) — update specs only if the intended behavior itself changed
+
+- **Learn from history.** Before any significant change, analyze past PRs/commits for the affected area. Use `codedev-mcp` (`git_log`, `git_blame`, `semantic_search`, `find_references`) to ground decisions in real history.
+- **Check whether the problem is already solved.** Search the repo before writing new code.
+- **KISS and YAGNI.** Write only what is needed now, structured for easy extension.
+- **Clean code.** SOLID, DRY, defensive programming; handle errors and edge cases.
+- **Document decisions.** Significant PRs include a rationale (ADR) explaining *why*.
+
+---
+
 ## Setup
 
 ```bash
@@ -28,6 +52,9 @@ poe test-fast      # pytest tests/ -x -q
 pytest tests/test_http_client.py::TestHttpClientSend::test_successful_get
 pytest -k "test_round_trip"
 
+# SonarQube — generate coverage and scan against local http://localhost:9000
+./scan-sonar.sh
+
 # No linter, formatter, or type-checker is configured. No CI. Tests run manually only.
 
 # Standalone build (spec file not yet committed — poe build will fail without it)
@@ -36,7 +63,26 @@ pip install pyinstaller && pyinstaller angryrest.spec
 
 ---
 
+## Required after every change — MANDATORY ✅ GATE
+
+**🚫 NEVER commit directly to `mvp`.** All work is done on a feature branch. Create one with `git checkout -b <branch-name>` before any editing. Commits on `mvp` are forbidden — if you accidentally commit to `mvp`, undo it immediately and create a branch.
+
+You MUST complete ALL of the following before considering any change done:
+
+1. **Update the relevant spec(s).** See the decision tree in "Working principles → SPECS". This is part of the change — untracked behavior change is incomplete change.
+2. **Write tests for every changed component.** Every new function/method/module must have tests; every behavioral change adds/updates test cases. No exceptions — untested code is incomplete code.
+3. **Run the full test suite** (`poe test`). Nothing must break.
+4. **Run `./scan-sonar.sh`.** The Quality Gate must pass. If a condition fails — coverage, duplication, violations — resolve it before proceeding. Pre-existing failures in an untouched area may be documented in the PR body with justification.
+5. **Create a pull request** using `gh pr create` (base `mvp`). This is the final step and MUST NOT be skipped. If a PR is already open for the branch, push to it instead.
+6. **Follow-up changes after a PR is open** go to the same PR branch — commit and push; never leave deltas only in the working tree.
+
+If any gate fails, fix it and re-run. Do not hand off incomplete work.
+
+---
+
 ## Architecture (strict — enforce in all new code)
+
+Target architecture (hexagonal + QML/MVVM) is defined in `docs/ARCHITECTURE.md`. The `models/`/`services/`/`ui/` rules below reflect the current QWidget MVP; these packages migrate into `domain/`/`application/`/`infrastructure/` per that spec.
 
 **Layer import rules:**
 - `models/` — zero Qt, zero UI logic. Serialization via `to_dict()` / `from_dict()` only.
