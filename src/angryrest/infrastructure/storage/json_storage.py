@@ -26,20 +26,20 @@ class JsonStorageAdapter:
         if order_file.exists():
             order = json.loads(order_file.read_text(encoding="utf-8"))
 
-        files_by_stem: dict[str, Path] = {}
+        files_by_id: dict[str, Path] = {}
         for path in self.collections_dir.glob("*.json"):
             if path.name == "_order.json":
                 continue
-            files_by_stem[path.stem] = path
+            files_by_id[path.stem] = path
 
         loaded_ids: set[str] = set()
         for cid in order:
-            if cid in files_by_stem:
-                data = json.loads(files_by_stem[cid].read_text(encoding="utf-8"))
+            if cid in files_by_id:
+                data = json.loads(files_by_id[cid].read_text(encoding="utf-8"))
                 collections.append(Collection.from_dict(data))
                 loaded_ids.add(cid)
-        for stem, path in files_by_stem.items():
-            if stem not in loaded_ids:
+        for cid, path in files_by_id.items():
+            if cid not in loaded_ids:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 collections.append(Collection.from_dict(data))
 

@@ -1,17 +1,22 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 import pytest
-
-from PySide6.QtCore import Property, QObject
+from PySide6.QtCore import Property, QObject, QUrl
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuick import QQuickItem
 
 from angryrest.application.services.collection_service import CollectionService
-from angryrest.application.viewmodels.collections_viewmodel import CollectionsViewModel
+from angryrest.application.viewmodels.collections_viewmodel import (
+    CollectionsViewModel,
+)
 from angryrest.infrastructure.storage.json_storage import JsonStorageAdapter
+
+QML_DIR = (
+    Path(__file__).parent.parent.parent / "src" / "angryrest" / "ui" / "qml"
+).resolve()
 
 
 class _TestTheme(QObject):
@@ -51,71 +56,72 @@ class _TestTheme(QObject):
     paramUnresolvedBg = Property(str, lambda self: "#3a1e1e", constant=True)
 
 
-@pytest.mark.skipif(
-    os.environ.get("QT_QPA_PLATFORM", "") != "offscreen",
-    reason="Requires QT_QPA_PLATFORM=offscreen",
-)
-class TestAppBootstrap:
-    def test_app_initializes(self, qtbot) -> None:
-        qml_dir = Path(__file__).parent.parent.parent / "src" / "angryrest" / "ui" / "qml"
+@pytest.fixture
+def theme() -> QObject:
+    return _TestTheme()
 
-        with tempfile.TemporaryDirectory() as tmp:
-            storage = JsonStorageAdapter(base_dir=Path(tmp))
-            collection_service = CollectionService(storage)
 
-            engine = QQmlApplicationEngine()
-            vm = CollectionsViewModel(collection_service)
-            vm.setParent(engine)
-            engine.rootContext().setContextProperty(
-                "collectionsVM", vm
-            )
-            theme = _TestTheme(parent=engine)
-            engine.rootContext().setContextProperty("theme", theme)
+@pytest.fixture
+def vm_and_storage() -> CollectionsViewModel:
+    tmp = tempfile.TemporaryDirectory()
+    storage = JsonStorageAdapter(base_dir=Path(tmp.name))
+    service = CollectionService(storage)
+    vm = CollectionsViewModel(service)
+    vm.load()
+    yield vm
+    tmp.cleanup()
 
-            engine.addImportPath(str(qml_dir.resolve()))
-            engine.load(str((qml_dir / "MainWindow.qml").resolve()))
 
-            root_objects = engine.rootObjects()
-            assert len(root_objects) > 0
+def find_item_by_text(parent: QQuickItem, text: str) -> QQuickItem | None:
+    return find_nested_by_text(parent, text)
 
-    def test_create_collection(self, qtbot) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            storage = JsonStorageAdapter(base_dir=Path(tmp))
-            service = CollectionService(storage)
-            vm = CollectionsViewModel(service)
-            vm.load()
 
-            assert vm.rowCount() == 0
+def find_nested_by_text(item: QQuickItem, text: str) -> QQuickItem | None:
+    item_text = item.property("text")
+    if isinstance(item_text, str) and item_text == text:
+        return item
+    for child in item.findChildren(QQuickItem):
+        result = find_nested_by_text(child, text)
+        if result is not None:
+            return result
+    return None
 
-            result = vm.create_collection("Test API")
-            assert result is True
-            assert vm.rowCount() == 1
 
-            loaded = storage.load_collections()
-            assert len(loaded) == 1
-            assert loaded[0].name == "Test API"
+def find_list_view(parent: QQuickItem) -> QQuickItem | None:
+    for child in parent.findChildren(QQuickItem):
+        class_name = child.metaObject().className()
+        if "ListView" in class_name or "TreeView" in class_name:
+            return child
+    return None
 
-    def test_rename_collection(self, qtbot) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            storage = JsonStorageAdapter(base_dir=Path(tmp))
-            service = CollectionService(storage)
-            vm = CollectionsViewModel(service)
-            vm.load()
 
-            vm.create_collection("Old Name")
-            vm.rename_collection(0, "New Name")
+def find_text_containing(parent: QQuickItem, substring: str) -> bool:
+    for child in parent.findChildren(QQuickItem):
+        text = child.property("text")
+        if isinstance(text, str) and substring in text:
+            return True
+    return False
 
-            assert vm.data(vm.index(0, 0), CollectionsViewModel.NameRole) == "New Name"
 
-    def test_delete_collection(self, qtbot) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            storage = JsonStorageAdapter(base_dir=Path(tmp))
-            service = CollectionService(storage)
-            vm = CollectionsViewModel(service)
-            vm.load()
+def load_qml_engine(
+    theme: QObject,
+    vm: CollectionsViewModel,
+    component_name: str,
+) -> QQmlApplicationEngine:
+    engine = QQmlApplicationEngine()
+    theme.setParent(engine)
+    vm.setParent(engine)
+    engine.addImportPath(str(QML_DIR))
+    engine.rootContext().setContextProperty("collectionsVM", vm)
+    engine.rootContext().setContextProperty("theme", theme)
+    engine.load(QUrl.fromLocalFile(str(QML_DIR / component_name)))
 
-            vm.create_collection("To Delete")
-            assert vm.rowCount() == 1
+    if not engine.rootObjects():
+        raise RuntimeError(f"{component_name} failed to load")
 
-            vm.delete_collection(0)
-            assert vm.rowCount() == 0
+    return engine
+
+
+def cleanup_engine(engine: QQmlApplicationEngine) -> None:
+    engine.clearComponentCache()
+    engine.deleteLater()
