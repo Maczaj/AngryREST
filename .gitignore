@@ -4,3 +4,7 @@
 .coverage
 coverage.xml
 .scannerwork/
+src/angryrest.egg-info/
+dist/
+build/
+*.spec.bak
